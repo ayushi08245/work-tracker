@@ -324,7 +324,8 @@ function SuggestionChips({ field, allDays, currentDay, onPick }) {
         ✦ RECURRING FROM PREVIOUS DAYS — click to reuse:
       </div>
       {chips.slice(0, 8).map((c, i) => (
-        <span key={i} style={styles.suggChip} onClick={() => onPick(field, c)}
+        <span key={i} style={styles.suggChip} 
+  onMouseDown={(e) => { e.preventDefault(); onPick(field, c); }}
           onMouseEnter={e => e.target.style.background = `${ACCENT}35`}
           onMouseLeave={e => e.target.style.background = `${ACCENT}18`}>
           + {c}
@@ -343,10 +344,12 @@ function DayForm({ dayIndex, days, setDays }) {
     copy[dayIndex] = { ...copy[dayIndex], [field]: value };
     setDays(copy);
   };
-  const handlePick = (field, chip) => {
-    const existing = data[field];
-    const newVal = existing ? `${existing}, ${chip}` : chip;
-    update(field, newVal);
+ const handlePick = (field, chip) => {
+    const existing = days[dayIndex][field];
+    const newVal = existing ? `${existing}\n${chip}` : chip;
+    const copy = [...days];
+    copy[dayIndex] = { ...copy[dayIndex], [field]: newVal };
+    setDays(copy);
   };
 
   const filledFields = Object.values(data).filter(Boolean).length;
@@ -537,11 +540,20 @@ function DaySidebar({ days }) {
 
 export default function WorkTracker() {
   const [activeTab, setActiveTab] = useState(0);
-  const [days, setDays] = useState(Array.from({ length: 5 }, emptyDay));
+  const [days, setDays] = useState(() => {
+  try {
+    const saved = localStorage.getItem("worktracker-days");
+    return saved ? JSON.parse(saved) : Array.from({ length: 5 }, emptyDay);
+  } catch {
+    return Array.from({ length: 5 }, emptyDay);
+  }
+});
   const [summary, setSummary] = useState("");
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
-
+  useEffect(() => {
+  localStorage.setItem("worktracker-days", JSON.stringify(days));
+}, [days]);
   useEffect(() => {
     const style = document.createElement("style");
     style.textContent = `
@@ -599,22 +611,35 @@ Generate a weekly summary with the following sections:
 Keep it professional, concise, and manager-friendly. Use clean formatting with clear section headers.`;
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-      const data = await res.json();
-      const text = data.content?.map(b => b.text || "").join("") || "Failed to generate summary.";
-      setSummary(text);
-    } catch (e) {
-      setSummary("Error generating summary. Please try again.");
-    }
-    setLoading(false);
+  const res = await fetch(
+  "https://api.groq.com/openai/v1/chat/completions",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization":  `Bearer ${import.meta.env.VITE_GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 1000,
+    }),
+  }
+);
+const data = await res.json();
+if (data.error) {
+  setSummary(`API Error: ${data.error.message}`);
+  setLoading(false);
+  return;
+}
+const text = data.choices?.[0]?.message?.content || "Failed to generate summary.";
+setSummary(text);
+} catch (e) {
+  console.error("Fetch error:", e);
+  setSummary(`Error: ${e.message}`);
+} finally {
+  setLoading(false);
+}
   };
 
   const isDay5Tab = activeTab === 5;
